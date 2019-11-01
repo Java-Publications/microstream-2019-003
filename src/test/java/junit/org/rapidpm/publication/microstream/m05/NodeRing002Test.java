@@ -1,11 +1,9 @@
 package junit.org.rapidpm.publication.microstream.m05;
 
-import one.microstream.X;
 import one.microstream.collections.types.XSequence;
 import one.microstream.storage.types.*;
 import one.microstream.util.cql.CQL;
 import org.jetbrains.annotations.NotNull;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.TestReporter;
@@ -18,7 +16,6 @@ import java.util.stream.StreamSupport;
 
 import static java.time.Duration.between;
 import static java.time.Instant.now;
-import static java.util.stream.Collectors.toList;
 import static junit.org.rapidpm.publication.microstream.StorageEngineUtils.*;
 
 public class NodeRing002Test
@@ -28,44 +25,30 @@ public class NodeRing002Test
   void test001(TestInfo info, TestReporter reporter) {
     final Node node01 = createRingOfNodes();
 
-    final File      tempFolder  = infoToCleanFolder().apply(info);
-    XSequence<File> exportFiles = writeData(info, reporter, node01, tempFolder);
+    final File                   tempFolder     = infoToCleanFolder().apply(info);
+    final EmbeddedStorageManager storageManager = EmbeddedStorage.start(tempFolder);
+    writeData(reporter, storageManager, node01);
+
+    //time to make backup
+    XSequence<File> exportFiles = exportData(info, storageManager);
+    exportFiles.forEach(f -> logger().info("exported file " + f.getName()));
+
     //clean data folder
     recreateTempFolder(tempFolder);
-
-    final EmbeddedStorageManager storageManager = importData(info, exportFiles);
-    final Node                   node01Again    = (Node) storageManager.root();
-
-    final Node node02Again = node01Again.getLeft();
-    final Node node03Again = node02Again.getLeft();
-    final Node node04Again = node03Again.getLeft();
-
-    Assertions.assertEquals(1, node01Again.getId());
-    Assertions.assertEquals(2, node02Again.getId());
-    Assertions.assertEquals(3, node03Again.getId());
-    Assertions.assertEquals(4, node04Again.getId());
-
-    Assertions.assertEquals(1, node04Again.getLeft()
-                                          .getId());
+    File targetDirectory = infoToCleanExportFolder("export_csv").apply(info);
+    StreamSupport.stream(exportFiles.spliterator(), false)
+                 .forEach(f -> exportDataAsCSV(storageManager, targetDirectory, f));
 
     storageManager.shutdown();
   }
 
   @NotNull
-  private XSequence<File> writeData(TestInfo info, TestReporter reporter, Node node01, File tempFolder) {
-    final EmbeddedStorageManager storageManager = EmbeddedStorage.start(tempFolder);
-
+  private void writeData(TestReporter reporter, EmbeddedStorageManager storageManager, Node node) {
     final Instant start = now();
-    storageManager.setRoot(node01);
+    storageManager.setRoot(node);
     storageManager.storeRoot();
     final Instant stop = now();
     reporter.publishEntry("duration store [ms] " + between(start, stop).toMillis());
-
-    //time to make backup
-    XSequence<File> exportFiles = exportData(info, storageManager);
-    exportFiles.forEach(f -> logger().info("exported file " + f.getName()));
-    storageManager.shutdown();
-    return exportFiles;
   }
 
   @NotNull
@@ -83,32 +66,34 @@ public class NodeRing002Test
     return node01;
   }
 
-  @NotNull
-  private EmbeddedStorageManager importData(TestInfo info, XSequence<File> exportFiles) {
-    final File                   tempFolder      = infoToCleanFolder().apply(info);
-    final EmbeddedStorageManager storageManagerA = EmbeddedStorage.start(tempFolder);
-    StorageConnection            connection      = storageManagerA.createConnection();
-
-
-    final File[] files = StreamSupport.stream(exportFiles.spliterator(), false)
-                                      .collect(toList())
-                                      .toArray(File[]::new);
-    connection.importFiles(X.Enum(files));
-    return storageManagerA;
-  }
-
   private XSequence<File> exportData(TestInfo info, EmbeddedStorageManager storageManagerA) {
-    File targetDirectory = infoToCleanExportFolder().apply(info);
+    File targetDirectory = infoToCleanExportFolder("export_bin").apply(info);
 
-    String            fileSuffix = "bin";
     StorageConnection connection = storageManagerA.createConnection();
     StorageEntityTypeExportStatistics exportResult = connection.exportTypes(
-        new StorageEntityTypeExportFileProvider.Default(targetDirectory, fileSuffix), typeHandler -> true);
+        new StorageEntityTypeExportFileProvider.Default(targetDirectory, "bin"),
+        typeHandler -> true);
     // export all, customize if necessary
     return CQL.from(exportResult.typeStatistics()
                                 .values())
               .project(s -> new File(s.file()
                                       .identifier()))
               .execute();
+  }
+
+  private void exportDataAsCSV(EmbeddedStorageManager storageManager, File targetDirectory, File typeFile) {
+    StorageDataConverterTypeBinaryToCsv converter = new StorageDataConverterTypeBinaryToCsv.UTF8(
+        StorageDataConverterCsvConfiguration.defaultConfiguration(),
+        new StorageEntityTypeConversionFileProvider.Default(targetDirectory, "csv"), storageManager.typeDictionary(),
+        null,         // no type name mapping
+        4096, // read buffer size
+        4096  // write buffer size
+    );
+    StorageLockedFile storageFile = StorageLockedFile.openLockedFile(typeFile);
+    try {
+      converter.convertDataFile(storageFile);
+    } finally {
+      storageFile.close();
+    }
   }
 }

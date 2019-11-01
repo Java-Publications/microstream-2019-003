@@ -40,13 +40,13 @@ public interface StorageEngineUtils {
     tempFolder.mkdirs();
   }
 
-  static Function<TestInfo, File> infoToCleanExportFolder() {
+  static Function<TestInfo, File> infoToCleanExportFolder(String postFix) {
     return (info) -> {
       final Class<?> aClass = info.getTestClass()
                                   .get();
       final Method method = info.getTestMethod()
                                 .get();
-      final File tempFolder = new File(TARGET_PATH, aClass.getSimpleName() + "_" + method.getName() + "_export");
+      final File tempFolder = new File(TARGET_PATH, aClass.getSimpleName() + "_" + method.getName() + "_" + postFix);
       recreateTempFolder(tempFolder);
       return tempFolder;
     };
