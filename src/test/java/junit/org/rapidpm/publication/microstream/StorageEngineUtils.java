@@ -22,15 +22,32 @@ public interface StorageEngineUtils {
       final Method   method     = info.getTestMethod()
                                       .get();
       final File     tempFolder = new File(TARGET_PATH, aClass.getSimpleName() + "_" + method.getName());
-      if (tempFolder.exists()) {
-        try {
-          walk(tempFolder.toPath()).sorted(reverseOrder())
-                                   .map(Path::toFile)
-                                   .forEach(File::delete);
-        } catch (IOException e) {
-          e.printStackTrace();
-        }
+      recreateTempFolder(tempFolder);
+      return tempFolder;
+    };
+  }
+
+  static void recreateTempFolder(File tempFolder) {
+    if (tempFolder.exists()) {
+      try {
+        walk(tempFolder.toPath()).sorted(reverseOrder())
+                                 .map(Path::toFile)
+                                 .forEach(File::delete);
+      } catch (IOException e) {
+        e.printStackTrace();
       }
+    }
+    tempFolder.mkdirs();
+  }
+
+  static Function<TestInfo, File> infoToCleanExportFolder() {
+    return (info) -> {
+      final Class<?> aClass = info.getTestClass()
+                                  .get();
+      final Method method = info.getTestMethod()
+                                .get();
+      final File tempFolder = new File(TARGET_PATH, aClass.getSimpleName() + "_" + method.getName() + "_export");
+      recreateTempFolder(tempFolder);
       return tempFolder;
     };
   }
